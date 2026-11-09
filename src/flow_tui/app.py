@@ -5,6 +5,7 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Static
 
 from flow_tui.pipeline import PipelineCoordinator, TelemetryState
+from flow_tui.stream import MarketStreamClient
 
 
 class BookWidget(Static):
@@ -96,6 +97,11 @@ class FlowApp(App):
     def __init__(self, symbol: str = "ETHUSDC") -> None:
         super().__init__()
         self.coordinator = PipelineCoordinator(symbol=symbol)
+        self.stream_client = MarketStreamClient(
+            symbol=symbol,
+            on_trade=self._handle_trade_event,
+            on_depth=self._handle_depth_event,
+        )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -103,6 +109,18 @@ class FlowApp(App):
             yield BookWidget(id="book-panel", classes="panel")
             yield TelemetryWidget(id="telemetry-panel", classes="panel")
         yield Footer()
+
+    def on_mount(self) -> None:
+        """Launch stream ingestion worker when interface loads."""
+        self.run_worker(self.stream_client.run(), exclusive=True, name="stream_worker")
+
+    def _handle_trade_event(self, trade) -> None:
+        self.coordinator.handle_trade(trade)
+        self.call_from_thread(self.refresh_views)
+
+    def _handle_depth_event(self, bids, asks) -> None:
+        self.coordinator.handle_depth_diff(bids, asks)
+        self.call_from_thread(self.refresh_views)
 
     def action_reset_metrics(self) -> None:
         """Reset internal pipeline aggregations."""
@@ -114,3 +132,8 @@ class FlowApp(App):
         state = self.coordinator.get_state()
         self.query_one("#book-panel", BookWidget).update_state(state)
         self.query_one("#telemetry-panel", TelemetryWidget).update_state(state)
+
+    async def action_quit(self) -> None:
+        """Gracefully stop stream before closing app."""
+        self.stream_client.stop()
+        self.exit()
