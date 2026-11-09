@@ -94,11 +94,13 @@ class FlowApp(App):
         ("r", "reset_metrics", "Reset Telemetry"),
     ]
 
-    def __init__(self, symbol: str = "ETHUSDC") -> None:
+    def __init__(self, symbol: str = "ETHUSDC", fps: int = 20) -> None:
         super().__init__()
-        self.coordinator = PipelineCoordinator(symbol=symbol)
+        self.symbol = symbol.upper()
+        self.fps = max(1, min(fps, 60))
+        self.coordinator = PipelineCoordinator(symbol=self.symbol)
         self.stream_client = MarketStreamClient(
-            symbol=symbol,
+            symbol=self.symbol,
             on_trade=self._handle_trade_event,
             on_depth=self._handle_depth_event,
         )
@@ -111,16 +113,17 @@ class FlowApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Launch stream ingestion worker when interface loads."""
+        """Initialize background stream ingestion and fixed-rate render loop."""
         self.run_worker(self.stream_client.run(), exclusive=True, name="stream_worker")
+        self.set_interval(1.0 / self.fps, self.refresh_views)
 
     def _handle_trade_event(self, trade) -> None:
+        """Ingest trade without triggering immediate UI repaints."""
         self.coordinator.handle_trade(trade)
-        self.call_from_thread(self.refresh_views)
 
     def _handle_depth_event(self, bids, asks) -> None:
+        """Ingest depth diff without triggering immediate UI repaints."""
         self.coordinator.handle_depth_diff(bids, asks)
-        self.call_from_thread(self.refresh_views)
 
     def action_reset_metrics(self) -> None:
         """Reset internal pipeline aggregations."""
@@ -128,12 +131,12 @@ class FlowApp(App):
         self.refresh_views()
 
     def refresh_views(self) -> None:
-        """Push latest pipeline state into UI widgets."""
+        """Render snapshot onto widgets at fixed timer intervals."""
         state = self.coordinator.get_state()
         self.query_one("#book-panel", BookWidget).update_state(state)
         self.query_one("#telemetry-panel", TelemetryWidget).update_state(state)
 
     async def action_quit(self) -> None:
-        """Gracefully stop stream before closing app."""
+        """Gracefully terminate client connection and exit."""
         self.stream_client.stop()
         self.exit()

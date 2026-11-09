@@ -1,16 +1,37 @@
-"""CLI entry point for flow-tui."""
+"""Command-line interface argument parsing for flow-tui."""
 
-import sys
-from rich.console import Console
+import argparse
+from typing import List, Optional
 
-console = Console()
 
-def main() -> int:
-    console.print(
-        "[bold cyan]flow-tui[/bold cyan] [dim]v0.1.0[/dim] - "
-        "[green]Core engine initialized.[/green]"
+def build_parser() -> argparse.ArgumentParser:
+    """Construct CLI argument parser with runtime options."""
+    parser = argparse.ArgumentParser(
+        prog="flow-tui",
+        description="High-performance terminal telemetry for market microstructure.",
     )
-    return 0
+    parser.add_argument(
+        "-s",
+        "--symbol",
+        type=str,
+        default="ETHUSDC",
+        help="Target trading pair symbol (default: ETHUSDC)",
+    )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=20,
+        help="Terminal UI refresh frequency in Hz (default: 20, max: 60)",
+    )
+    return parser
 
-if __name__ == "__main__":
-    sys.exit(main())
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """CLI execution entry point."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    from flow_tui.app import FlowApp
+
+    app = FlowApp(symbol=args.symbol, fps=args.fps)
+    app.run()
